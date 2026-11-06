@@ -51,7 +51,7 @@ async function confirmDeactivation() {
     await ElMessageBox.confirm(
       `${studentName.value} will no longer be able to log in or submit weekly activity reports or peer evaluations, ` +
         'and any open session ends at the next request. The student stays on the team and past work is kept. ' +
-        'Teammates will no longer evaluate this student. The account can be reactivated later; this is not deletion.',
+        'Teammates will no longer evaluate this student. This is not deletion, but reactivating a student is not yet available.',
       `Deactivate ${studentName.value}?`,
       { type: 'warning', confirmButtonText: 'Deactivate', cancelButtonText: 'Cancel' }
     )

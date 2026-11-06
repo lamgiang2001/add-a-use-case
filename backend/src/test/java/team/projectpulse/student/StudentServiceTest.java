@@ -173,8 +173,9 @@ class StudentServiceTest {
         assertThat(result.getFirstName()).isEqualTo(update.getFirstName());
         assertThat(result.getLastName()).isEqualTo(update.getLastName());
         assertThat(result.getEmail()).isEqualTo(update.getEmail());
-//        assertThat(result.getRoles()).isEqualTo(update.getRoles());
-        assertThat(result.isEnabled()).isEqualTo(update.isEnabled());
+        // Deactivation has its own action (UC-STU-deactivate-student), so the enabled flag in the body is ignored
+        // even for an instructor
+        assertThat(result.isEnabled()).isTrue();
     }
 
     @Test

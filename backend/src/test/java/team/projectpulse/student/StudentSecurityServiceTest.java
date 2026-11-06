@@ -66,4 +66,13 @@ class StudentSecurityServiceTest {
         assertThat(this.studentSecurityService.isCurrentUserAdminOfStudentCourse(999999)).isFalse();
     }
 
+    @Test
+    void testStudentWithNoSectionDeniesInstructorOfStudentSection() {
+        Student noSection = new Student("e.lee@abc.edu", "Eric", "Lee", "e.lee@abc.edu", "123456", true, "student");
+        given(this.userUtils.getUserId()).willReturn(1);
+        given(this.studentRepository.findById(5)).willReturn(Optional.of(noSection));
+
+        assertThat(this.studentSecurityService.isCurrentUserInstructorOfStudentSection(5)).isFalse();
+    }
+
 }

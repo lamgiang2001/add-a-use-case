@@ -5,6 +5,9 @@ import team.projectpulse.instructor.Instructor;
 import team.projectpulse.section.Section;
 import team.projectpulse.section.SectionRepository;
 import team.projectpulse.system.UserUtils;
+import team.projectpulse.system.exception.ObjectNotFoundException;
+import team.projectpulse.system.exception.StudentAlreadyDeactivatedException;
+import team.projectpulse.team.Team;
 import team.projectpulse.user.MyUserPrincipal;
 import team.projectpulse.user.userinvitation.UserInvitationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +31,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
@@ -176,6 +180,49 @@ class StudentServiceTest {
         // Deactivation has its own action (UC-STU-deactivate-student), so the enabled flag in the body is ignored
         // even for an instructor
         assertThat(result.isEnabled()).isTrue();
+    }
+
+    @Test
+    void testDeactivateStudent() {
+        // Given: UC-STU-deactivate-student main flow
+        Student john = this.students.get(0);
+        Team team = new Team("Team1", "Team 1 description", "https://www.team1.com");
+        team.addStudent(john);
+        given(this.studentRepository.findById(1)).willReturn(Optional.of(john));
+        given(this.studentRepository.save(john)).willReturn(john);
+
+        // When
+        Student result = this.studentService.deactivateStudent(1);
+
+        // Then: only enabled changes; she stays on her team (BR-student-lifecycle)
+        assertThat(result.isEnabled()).isFalse();
+        assertThat(result.getTeam()).isSameAs(team);
+        verify(this.studentRepository, times(1)).save(john);
+    }
+
+    @Test
+    void testDeactivateStudentAlreadyDeactivated() {
+        // Given: extension 3a
+        Student john = this.students.get(0);
+        john.setEnabled(false);
+        given(this.studentRepository.findById(1)).willReturn(Optional.of(john));
+
+        // When and then
+        assertThatThrownBy(() -> this.studentService.deactivateStudent(1))
+                .isInstanceOf(StudentAlreadyDeactivatedException.class)
+                .hasMessage("The student is already deactivated.");
+        verify(this.studentRepository, never()).save(any());
+    }
+
+    @Test
+    void testDeactivateStudentDeletedAfterTheGuard() {
+        // Given: extension 6a, the student was deleted between the route rule and the service
+        given(this.studentRepository.findById(1)).willReturn(Optional.empty());
+
+        // When and then
+        assertThatThrownBy(() -> this.studentService.deactivateStudent(1))
+                .isInstanceOf(ObjectNotFoundException.class);
+        verify(this.studentRepository, never()).save(any());
     }
 
     @Test

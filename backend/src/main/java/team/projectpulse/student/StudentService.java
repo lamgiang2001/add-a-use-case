@@ -4,6 +4,7 @@ import team.projectpulse.section.Section;
 import team.projectpulse.section.SectionRepository;
 import team.projectpulse.system.UserUtils;
 import team.projectpulse.system.exception.ObjectNotFoundException;
+import team.projectpulse.system.exception.StudentAlreadyDeactivatedException;
 import team.projectpulse.user.userinvitation.UserInvitationService;
 import jakarta.transaction.Transactional;
 import org.springframework.data.domain.Page;
@@ -115,6 +116,24 @@ public class StudentService {
         oldStudent.setEmail(update.getEmail());
 
         return this.studentRepository.save(oldStudent);
+    }
+
+    /**
+     * Deactivates a student (UC-STU-deactivate-student). Her account, team, and submitted work are kept
+     * (BR-student-lifecycle); only {@code enabled} changes.
+     *
+     * <p>The route rule has already checked that the caller may act on this student and refused an id that names
+     * nobody, so this unscoped lookup is the documented exception for a flat route whose only id the guard owns.
+     * Its 404 is reached only if she is deleted between the guard and this call.
+     */
+    public Student deactivateStudent(Integer studentId) {
+        Student student = this.studentRepository.findById(studentId)
+                .orElseThrow(() -> new ObjectNotFoundException("student", studentId));
+        if (!student.isEnabled()) {
+            throw new StudentAlreadyDeactivatedException();
+        }
+        student.setEnabled(false);
+        return this.studentRepository.save(student);
     }
 
     public void deleteStudent(Integer studentId) {

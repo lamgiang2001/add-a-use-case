@@ -16,6 +16,9 @@ import team.projectpulse.student.Student;
 import team.projectpulse.student.StudentRepository;
 import team.projectpulse.system.StatusCode;
 import team.projectpulse.user.UserRepository;
+import tools.jackson.databind.json.JsonMapper;
+
+import java.util.Map;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -42,6 +45,9 @@ class ActiveAccountIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     InstructorRepository instructorRepository;
 
+    @Autowired
+    JsonMapper jsonMapper;
+
     @Value("${api.endpoint.base-url}")
     String baseUrl;
 
@@ -64,6 +70,21 @@ class ActiveAccountIntegrationTest extends AbstractIntegrationTest {
         this.mockMvc.perform(get(this.baseUrl + "/students/" + jerry().getId()).accept(MediaType.APPLICATION_JSON).header(HttpHeaders.AUTHORIZATION, token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.flag").value(true));
+    }
+
+    @Test
+    @DisplayName("An active instructor with a valid token reaches an instructor-only route, so authorities are still built")
+    void activeInstructorWithValidTokenReachesInstructorOnlyRoute() throws Exception {
+        // POST /students/search is hasAuthority("ROLE_instructor"): a 200 means the delegate converter still
+        // turned the authorities claim into granted authorities
+        String token = login("b.gates@abc.edu");
+
+        this.mockMvc.perform(post(this.baseUrl + "/students/search").contentType(MediaType.APPLICATION_JSON)
+                        .content(this.jsonMapper.writeValueAsString(Map.of())).accept(MediaType.APPLICATION_JSON)
+                        .header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.flag").value(true))
+                .andExpect(jsonPath("$.code").value(StatusCode.SUCCESS));
     }
 
     @Test
@@ -105,7 +126,9 @@ class ActiveAccountIntegrationTest extends AbstractIntegrationTest {
 
         this.mockMvc.perform(get(this.baseUrl + "/students/" + jerry().getId()).accept(MediaType.APPLICATION_JSON).header(HttpHeaders.AUTHORIZATION, token))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value(StatusCode.UNAUTHORIZED));
+                .andExpect(jsonPath("$.code").value(StatusCode.UNAUTHORIZED))
+                .andExpect(jsonPath("$.message").value("User account is abnormal."))
+                .andExpect(jsonPath("$.data").value("This account is deactivated or no longer exists."));
     }
 
 }

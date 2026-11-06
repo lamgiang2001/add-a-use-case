@@ -343,8 +343,10 @@ class StudentIntegrationTest extends AbstractIntegrationTest {
         Student jerry = jerry();
         Integer teamIdBefore = jerry.getTeam().getTeamId();
         int evaluationsOfHerBefore = this.peerEvaluationRepository.findByWeekAndEvaluateeId("2023-W31", jerry.getId()).size();
+        int evaluationsByHerBefore = this.peerEvaluationRepository.findByWeekAndEvaluatorId("2023-W31", jerry.getId()).size();
         long activitiesBefore = jerrysActivityCount(jerry.getId());
         assertThat(evaluationsOfHerBefore).isPositive();
+        assertThat(evaluationsByHerBefore).isPositive();
         assertThat(activitiesBefore).isPositive();
 
         this.mockMvc.perform(put(this.baseUrl + "/students/" + jerry.getId() + "/deactivate").accept(MediaType.APPLICATION_JSON).header(HttpHeaders.AUTHORIZATION, this.instructorBillToken))
@@ -362,6 +364,7 @@ class StudentIntegrationTest extends AbstractIntegrationTest {
         assertThat(after.isEnabled()).isFalse();
         assertThat(after.getTeam().getTeamId()).isEqualTo(teamIdBefore);
         assertThat(this.peerEvaluationRepository.findByWeekAndEvaluateeId("2023-W31", jerry.getId())).hasSize(evaluationsOfHerBefore);
+        assertThat(this.peerEvaluationRepository.findByWeekAndEvaluatorId("2023-W31", jerry.getId())).hasSize(evaluationsByHerBefore);
         assertThat(jerrysActivityCount(jerry.getId())).isEqualTo(activitiesBefore);
     }
 
@@ -418,6 +421,30 @@ class StudentIntegrationTest extends AbstractIntegrationTest {
         this.mockMvc.perform(put(this.baseUrl + "/students/" + jerry.getId() + "/deactivate").accept(MediaType.APPLICATION_JSON).header(HttpHeaders.AUTHORIZATION, this.studentJohnToken))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(StatusCode.FORBIDDEN));
+
+        assertThat(this.studentRepository.findById(jerry.getId()).orElseThrow().isEnabled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("UC-STU-deactivate-student 3b: an instructor of a different course section of the same course is denied")
+    void testInstructorOfAnotherSectionOfTheSameCourseCannotDeactivateStudent() throws Exception {
+        // No seeded instructor teaches only the other section, so Bill is taken off Jerry's course section and kept
+        // on the course's other section (2022-2023). He is not the course admin, so neither check admits him.
+        Student jerry = jerry();
+        Section jerrysSection = jerry.getSection();
+        Instructor bill = (Instructor) this.userRepository.findByUsername("b.gates@abc.edu").orElseThrow();
+        jerrysSection.removeInstructor(bill);
+        this.studentRepository.flush();
+        assertThat(jerrysSection.getInstructors()).doesNotContain(bill);
+        assertThat(bill.getSections()).isNotEmpty()
+                .allSatisfy(section -> assertThat(section.getCourse().getCourseId()).isEqualTo(jerrysSection.getCourse().getCourseId()));
+        assertThat(jerrysSection.getCourse().getCourseAdmin().getId()).isNotEqualTo(bill.getId());
+
+        this.mockMvc.perform(put(this.baseUrl + "/students/" + jerry.getId() + "/deactivate").accept(MediaType.APPLICATION_JSON).header(HttpHeaders.AUTHORIZATION, this.instructorBillToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.flag").value(false))
+                .andExpect(jsonPath("$.code").value(StatusCode.FORBIDDEN))
+                .andExpect(jsonPath("$.message").value("No permission."));
 
         assertThat(this.studentRepository.findById(jerry.getId()).orElseThrow().isEnabled()).isTrue();
     }

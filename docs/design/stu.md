@@ -80,10 +80,10 @@ sequenceDiagram
         SPA-->>I: dialog closes, no request sent
     else confirm (step 5)
         SPA->>SEC: PUT /students/{studentId}/deactivate
-        SEC-->>SPA: 403 unless instructor of her course section or course admin of her course (3b)
+        SEC-->>SPA: 403 unless instructor of her course section or course admin of her course (3b), or if she does not exist (6a)
         SEC->>SC: deactivateStudent(studentId)
         SC->>SS: deactivateStudent(studentId)
-        SS->>DB: findById, 404 if absent (6a)
+        SS->>DB: findById (unknown ids were already refused by the guard, 6a); 404 only if she was deleted after it
         SS-->>SC: 409 if already deactivated (3a, server guard)
         SS->>DB: enabled = false, save (team untouched)
         SC-->>SPA: 200, StudentDto
@@ -114,7 +114,7 @@ sequenceDiagram
 
 | Endpoint or job | Caller (who may) | Request | Success | Errors, by extension |
 |---|---|---|---|---|
-| `PUT /students/{studentId}/deactivate` (new) | course admin of the student's course, or instructor assigned to her course section (BR-student-lifecycle) | `studentId` in the path; no body | 200, `Result` with the updated `StudentDto` (`enabled` false) | 403 actor not permitted (3b); 404 student not found (6a); 409 student already deactivated (3a) |
+| `PUT /students/{studentId}/deactivate` (new) | course admin of the student's course, or instructor assigned to her course section (BR-student-lifecycle) | `studentId` in the path; no body | 200, `Result` with the updated `StudentDto` (`enabled` false) | 403 actor not permitted (3b) or student does not exist (6a; the guard fails closed); 404 only if she is deleted between guard and service (6a); 409 student already deactivated (3a) |
 | `PUT /students/{studentId}` (changed) | unchanged | `enabled` in the body is ignored | unchanged | unchanged |
 | every authenticated route (changed) | any account with a valid JWT | unchanged | unchanged while the account is enabled | 401 once the account is deactivated or gone (FR-SEC-active-account) |
 | `POST /evaluations`, `PUT /evaluations/{evaluationId}` (changed) | student, unchanged | unchanged | unchanged | 400 when the evaluatee is deactivated (BR-evaluation-active-evaluatee) |
@@ -128,8 +128,25 @@ sequenceDiagram
 - **Deactivation keeps her team and history** (BR-student-lifecycle). Rejected: removing her from her team, which would orphan team-scoped history from her and make reactivation a two-step operation.
 - **Peer evaluations of a deactivated student are rejected on the server**, on create and update (BR-evaluation-active-evaluatee), and the form hides her. Rejected: hiding her only in the form, which a stale page or direct call bypasses.
 - **The section report decides by evidence, not by a date.** `generateWeeklyPeerEvaluationReportForSection` keeps an enabled student on a team as today, and keeps a deactivated one only when the week has at least one peer evaluation of her (`PeerEvaluationRepository.findByWeekAndEvaluateeId`). Because BR-evaluation-active-evaluatee blocks evaluations after deactivation, that is exactly "weeks before her deactivation that have data". Rejected: a `deactivatedAt` column, a schema change that would also need backfilling for already-disabled accounts.
+- **6a answers 403, not 404.** The guard fails closed (Crosscutting Concepts), so an unknown id is refused before the service runs and no caller learns which ids exist; the use case's 6a was worded to match. The service's 404 remains for a student deleted after the guard passes.
 - **409 for an already deactivated student**, not an idempotent 200: 3a is a distinct outcome, and a 409 tells a stale page to reload. The UI never offers the action in that state.
 - **No email to the student.** Step 6 informs only the actor; her next login attempt fails with the existing account-status 401.
+
+## Implementation pins
+
+Answers to the questions test, fixed here so `/implement` does not guess:
+
+- **Guard.** `isCurrentUserInstructorOfStudentSection` (reused) checks that the student's course section lists the caller among its instructors. `isCurrentUserAdminOfStudentCourse` (new) compares `student.section.course.courseAdmin.id` with `UserUtils.getUserId()`, returning `false` on any null; it does not use the caller's default course, so a course admin of several courses is not wrongly refused. The route rule `PUT ${base}/students/{studentId}/deactivate` sits with the other `/students` rules; no existing pattern matches that path, so order does not matter, and without the rule the deny-all catch-all would refuse everyone.
+- **Point 2.** `deactivateStudent` loads the student by the same path id the guard checked; there is no second id to cross-check, so the unscoped `findById` is the documented exception for a flat route whose only id the guard owns.
+- **Converter.** `ActiveAccountJwtAuthenticationConverter` is a `Converter<Jwt, AbstractAuthenticationToken>` bean that wraps the existing `jwtAuthenticationConverter()` bean. It reads `userId` the way `UserUtils.getUserId` does (Integer, Long, or String); a missing claim, an unknown id, or `enabled` false throws `DisabledException`, an `AuthenticationException`, so the bearer-token entry point answers 401, not 500. It also runs when a token is sent to a `permitAll` route; a deactivated caller then gets 401, which is acceptable.
+- **Confirm dialog (step 4).** Warning type, title "Deactivate <first> <last>?", buttons Deactivate and Cancel. Body: she can no longer log in or submit weekly activity reports or peer evaluations; any open session ends at her next request; she stays on her team and her past work is kept; her teammates no longer evaluate her; the account can be reactivated later; this is not deletion. The Deactivate button is disabled while the request is in flight.
+- **SPA errors.** The shared Axios interceptor already sends 403 to the forbidden page and toasts other errors with the server message; the page keeps that. On 409 it re-fetches the student, so the tag shows Deactivated and the button disappears.
+- **Visibility.** The button shows for any instructor or course admin viewing an enabled student; the server enforces 3b.
+- **Data on the page.** `StudentDto` already carries `enabled` (`StudentToStudentDtoConverter`), on both `GET /students/{studentId}` and `GET /students/teams/{teamId}`, which `SubmitTeamsEvaluations.vue` uses; the form filters on it. The tag reads Active (success) or Deactivated (danger).
+- **Evaluation guard.** On create, the evaluatee is the one `PeerEvaluationDtoToPeerEvaluationConverter` already re-loads by id; on update, the stored evaluation's evaluatee, never the body. The check runs after the team-membership check and before saving; message "You cannot evaluate a deactivated student."
+- **Report.** The section report has no "has not submitted" column (that moved to `notification`, see [not.md](not.md)), so the evidence filter is its only change. Only peer evaluations of her count as evidence, as UC-EVA-section-evaluation-report states.
+- **409.** New `StudentAlreadyDeactivatedException` in `student/`, handled in `ExceptionHandlerAdvice` with `StatusCode.CONFLICT` (exists), message "The student is already deactivated." The 200 message is "Deactivate student successfully"; the SPA builds the name from the returned DTO.
+- **Tests.** Mutating integration tests deactivate a student no other test relies on, or seed one, so other suites' tokens stay valid. The deactivated-instructor test sets `enabled` false through `InstructorRepository` after logging in, since UC-INS-deactivate-instructor has no endpoint yet. A concurrent double deactivation may return 200 twice; accepted, since the end state is correct and the button is disabled in flight.
 
 ## Data model
 
@@ -152,7 +169,8 @@ No delta. `peer_evaluation_user.enabled` already exists; see the SRS's Business 
 | 3a in the UI | manual | the page shows Deactivated and no Deactivate button |
 | 3b student (herself or another), or instructor of another course section | integration | 403; student unchanged |
 | 5a cancel | manual | no request sent; student unchanged |
-| 6a student not found | unit + integration | 404 |
+| 6a student does not exist | integration | 403; nothing changed |
+| 6a student deleted after the guard | unit (`StudentService`) | 404 |
 | FR-SEC-active-account: deactivated student logs in | integration | 401 |
 | FR-SEC-active-account: active user with a valid JWT calls a protected route | integration | 200 |
 | FR-SEC-active-account: deactivated student with a JWT issued before deactivation | integration | 401 |

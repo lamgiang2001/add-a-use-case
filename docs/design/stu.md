@@ -145,7 +145,7 @@ Answers to the questions test, fixed here so `/implement` does not guess:
 - **Data on the page.** `StudentDto` already carries `enabled` (`StudentToStudentDtoConverter`), on both `GET /students/{studentId}` and `GET /students/teams/{teamId}`, which `SubmitTeamsEvaluations.vue` uses; the form filters on it. The tag reads Active (success) or Deactivated (danger).
 - **Evaluation guard.** On create, the evaluatee is the one `PeerEvaluationDtoToPeerEvaluationConverter` already re-loads by id; on update, the stored evaluation's evaluatee, never the body. The check runs after the team-membership check and before saving; message "You cannot evaluate a deactivated student."
 - **Report.** The section report has no "has not submitted" column (that moved to `notification`, see [not.md](not.md)), so the evidence filter is its only change. Only peer evaluations of her count as evidence, as UC-EVA-section-evaluation-report states.
-- **409.** New `StudentAlreadyDeactivatedException` in `student/`, handled in `ExceptionHandlerAdvice` with `StatusCode.CONFLICT` (exists), message "The student is already deactivated." The 200 message is "Deactivate student successfully"; the SPA builds the name from the returned DTO.
+- **409.** New `StudentAlreadyDeactivatedException` in `system/exception/`, beside every other handled exception, handled in `ExceptionHandlerAdvice` with `StatusCode.CONFLICT` (exists), message "The student is already deactivated." The 200 message is "Deactivate student successfully"; the SPA builds the name from the returned DTO.
 - **Tests.** Mutating integration tests deactivate a student no other test relies on, or seed one, so other suites' tokens stay valid. The deactivated-instructor test sets `enabled` false through `InstructorRepository` after logging in, since UC-INS-deactivate-instructor has no endpoint yet. A concurrent double deactivation may return 200 twice; accepted, since the end state is correct and the button is disabled in flight.
 
 ## Data model
@@ -155,7 +155,7 @@ No delta. `peer_evaluation_user.enabled` already exists; see the SRS's Business 
 ## Reuse & cross-cutting
 
 - Route guards follow the two-enforcement-point pattern and fail-closed rule in Crosscutting Concepts (`PathVariables`, `AuthorizationDecision`).
-- Errors use the existing `Result` envelope and handlers: `ObjectNotFoundException` → 404, `AccessDeniedException` → 403, `PeerEvaluationIllegalArgumentException` → 400; 409 uses `StatusCode.CONFLICT` with a new student-slice exception handled in `ExceptionHandlerAdvice`.
+- Errors use the existing `Result` envelope and handlers: `ObjectNotFoundException` → 404, `AccessDeniedException` → 403, `PeerEvaluationIllegalArgumentException` → 400; 409 uses `StatusCode.CONFLICT` with a new `system/exception/StudentAlreadyDeactivatedException` handled in `ExceptionHandlerAdvice`.
 - What a student owes and who is reminded already follow BR-submission-owed in `notification` (see [not.md](not.md)); nothing there changes.
 
 ## Tests
